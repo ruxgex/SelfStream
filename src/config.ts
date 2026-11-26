@@ -1,7 +1,8 @@
 export const config = {
   tmdbApiKey: process.env.TMDB_API_KEY || "YOUR_TMDB_API_KEY_HERE",
   vixsrcDomain: "vixsrc.to",
-  vixcloudDomain: "vixcloud.cc"
+  vixcloudDomain: "vixcloud.cc",
+  videmDomain: process.env.VIDEM_DOMAIN || "videm.buzz"
 };
 
 export const AVAILABLE_LANGUAGES = [
@@ -50,12 +51,14 @@ export const AVAILABLE_LANGUAGES = [
 export interface UserConfig {
   vixEnabled: boolean;
   vixLang: string;
+  videmEnabled: boolean;
   animeunityEnabled: boolean;
 }
 
 export const DEFAULT_CONFIG: UserConfig = {
   vixEnabled: true,
   vixLang: 'en',
+  videmEnabled: true,
   animeunityEnabled: false
 };
 
@@ -69,6 +72,8 @@ export function decodeConfig(token: string): UserConfig {
     return {
       vixEnabled: parsed.vixEnabled === true,
       vixLang: parsed.vixLang || DEFAULT_CONFIG.vixLang,
+      // Manifests installed before VideM existed get it too.
+      videmEnabled: parsed.videmEnabled !== false,
       animeunityEnabled: parsed.animeunityEnabled === true
     };
   } catch {

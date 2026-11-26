@@ -102,6 +102,13 @@ p.description{font-size:16px;color:var(--text-muted);line-height:1.6;margin-bott
     </div>
 </div>
 
+<div class="source-row enabled" id="videm-row">
+    <div class="source-header">
+        <span class="source-label">🎞️ VideM <span class="source-badge">Large catalog · Uses ViX language</span></span>
+        <label class="toggle"><input type="checkbox" id="videmEnabled" checked onchange="toggleSource('videm')"><span class="toggle-slider"></span></label>
+    </div>
+</div>
+
 <div class="source-row disabled" id="animeunity-row">
     <div class="source-header">
         <span class="source-label">🇮🇹 AnimeUnity <span class="source-badge">Only Local and 🇮🇹 · Use Kitsu</span></span>
@@ -170,6 +177,7 @@ function getConfig(){
     return {
         vixEnabled: document.getElementById('vixEnabled').checked,
         vixLang: document.getElementById('vixLang').value,
+        videmEnabled: document.getElementById('videmEnabled').checked,
         animeunityEnabled: document.getElementById('animeunityEnabled').checked
     };
 }

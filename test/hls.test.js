@@ -59,6 +59,13 @@ test('rewritten media playlist proxies segments and keys', () => {
     assert.match(out, /#EXTINF:6.000,/);
 });
 
+test('fMP4 playlists get .mp4 segment URLs, including the init segment', () => {
+    const fmp4 = '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:6,\nseg0.m4s\n#EXTINF:6,\nseg1.m4s\n#EXT-X-ENDLIST\n';
+    const out = hls.rewriteMedia(fmp4, 'https://cdn.example/p/v.m3u8', {}, 'http://addon');
+    assert.strictEqual(out.match(/http:\/\/addon\/proxy\/hls\/segment\.mp4\?token=/g).length, 3);
+    assert.doesNotMatch(out, /segment\.ts/);
+});
+
 test('VOD playlists are cached, retried on 5xx, live ones are not cached', async () => {
     const agent = new MockAgent();
     agent.disableNetConnect();

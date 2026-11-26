@@ -145,14 +145,53 @@ function cacheSet(key: string, entry: CacheEntry): void {
 // ── Download (retry + range resume + stream-through) ──
 
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const PNG_DECISION_BYTES = 8 + 189;
+const TS_PACKET = 188;
+// Bytes needed to tell whether a segment starts with a PNG signature.
+const PNG_SIG_BYTES = PNG_SIG.length;
+// How far into a PNG-disguised segment to look for the MPEG-TS start.
+const PNG_MAX_SCAN_BYTES = 256 * 1024;
 
-/** Some CDNs prepend a fake PNG header to MPEG-TS segments. */
-function fakePngHeaderLength(head: Buffer): number {
-    if (head.length <= 8 || !head.subarray(0, 8).equals(PNG_SIG)) return 0;
-    if (head[8] !== 0x47) return 0;
-    if (head.length > 196 && head[196] !== 0x47) return 0;
-    return 8;
+function isTsSyncAt(buf: Buffer, k: number): boolean {
+    return buf[k] === 0x47 && buf[k + TS_PACKET] === 0x47 && buf[k + 2 * TS_PACKET] === 0x47;
+}
+
+const MP4_BOXES = new Set(['ftyp', 'styp', 'moov', 'moof', 'sidx', 'mdat']);
+
+function isMp4BoxAt(buf: Buffer, k: number): boolean {
+    return k + 8 <= buf.length && MP4_BOXES.has(buf.toString('latin1', k + 4, k + 8));
+}
+
+export interface Disguise {
+    /** Leading bytes to drop. */
+    offset: number;
+    /** Real content type of what follows, when it was disguised. */
+    contentType?: string;
+}
+
+/**
+ * Some CDNs disguise media segments as PNG images: either a bare PNG signature or a whole
+ * small PNG image in front of MPEG-TS or fragmented-MP4 data. Returns what to strip, or
+ * null if more bytes are needed to decide.
+ */
+export function detectDisguise(head: Buffer, final: boolean): Disguise | null {
+    if (head.length < PNG_SIG_BYTES) return final ? { offset: 0 } : null;
+    if (!head.subarray(0, PNG_SIG_BYTES).equals(PNG_SIG)) return { offset: 0 };
+
+    // A complete PNG image: the media starts right after the IEND chunk (type + CRC).
+    const iend = head.indexOf('IEND', PNG_SIG_BYTES, 'latin1');
+    if (iend >= 0) {
+        const k = iend + 8;
+        if (isMp4BoxAt(head, k)) return { offset: k, contentType: 'video/mp4' };
+        if (head[k] === 0x47) return { offset: k, contentType: 'video/mp2t' };
+        if (head.length < k + 8 && !final) return null;
+    }
+    // A bare signature (or PNG chunks we can't follow): look for the TS sync pattern.
+    for (let k = PNG_SIG_BYTES; k + 2 * TS_PACKET < head.length; k++) {
+        if (isTsSyncAt(head, k)) return { offset: k, contentType: 'video/mp2t' };
+    }
+    if (!final && head.length < PNG_MAX_SCAN_BYTES) return null;
+    // Short segment: accept a single TS packet right after the signature.
+    return head[PNG_SIG_BYTES] === 0x47 ? { offset: PNG_SIG_BYTES, contentType: 'video/mp2t' } : { offset: 0 };
 }
 
 class NonRetryable extends Error {}
@@ -183,14 +222,21 @@ function startDownload(url: string, headers: Record<string, string>): Download {
         if (decided) return emit(chunk);
         head.push(chunk);
         headLen += chunk.length;
-        if (headLen >= PNG_DECISION_BYTES) flushHead();
+        flushHead(false);
     };
-    const flushHead = () => {
+    const flushHead = (final: boolean) => {
         if (decided) return;
-        decided = true;
         const buf = Buffer.concat(head, headLen);
+        const disguise = detectDisguise(buf, final);
+        if (!disguise) {
+            head = [buf];
+            return;
+        }
+        decided = true;
         head = [];
-        emit(buf.subarray(fakePngHeaderLength(buf)));
+        // The upstream labels disguised segments image/png; players need the real type.
+        if (disguise.contentType) dl.contentType = disguise.contentType;
+        emit(buf.subarray(disguise.offset));
     };
 
     dl.done = (async (): Promise<CacheEntry | null> => {
@@ -200,6 +246,8 @@ function startDownload(url: string, headers: Record<string, string>): Download {
                 const reqHeaders = rawOffset > 0 ? { ...headers, Range: `bytes=${rawOffset}-` } : headers;
                 const { body, statusCode, headers: respHeaders } = await request(url, {
                     headers: reqHeaders,
+                    // Some CDNs (e.g. VideM's XPT servers) redirect segment URLs to the real host.
+                    maxRedirections: 3,
                     headersTimeout: HEADERS_TIMEOUT_MS,
                     bodyTimeout: BODY_TIMEOUT_MS,
                 });
@@ -211,7 +259,8 @@ function startDownload(url: string, headers: Record<string, string>): Download {
                 if (rawOffset === 0) {
                     const ct = respHeaders['content-type'];
                     const contentType = Array.isArray(ct) ? ct[0] : ct;
-                    if (contentType) dl.contentType = contentType;
+                    // Image types come from CDNs disguising TS segments; keep video/mp2t.
+                    if (contentType && !contentType.startsWith('image/')) dl.contentType = contentType;
                 }
                 // A full response to a range request: skip what we already have.
                 let skip = rawOffset > 0 && statusCode === 200 ? rawOffset : 0;
@@ -229,7 +278,7 @@ function startDownload(url: string, headers: Record<string, string>): Download {
                 break;
             } catch (err: any) {
                 if (err instanceof NonRetryable || attempt >= FETCH_RETRIES) {
-                    console.error(`[SegmentCache] fetch failed (${attempt + 1} attempts): ${err?.message || err}`);
+                    console.error(`[SegmentCache] fetch failed (${attempt + 1} attempts): ${err?.message || err} ${url.substring(0, 80)}`);
                     dl.state = 'failed';
                     downloads.delete(url);
                     for (const l of dl.listeners) l.onError();
@@ -240,7 +289,7 @@ function startDownload(url: string, headers: Record<string, string>): Download {
             }
         }
 
-        flushHead();
+        flushHead(true);
         const data = Buffer.concat(dl.chunks);
         const entry: CacheEntry = { data, contentType: dl.contentType, size: data.length, expireAt: Date.now() + TTL_MS };
         cacheSet(url, entry);

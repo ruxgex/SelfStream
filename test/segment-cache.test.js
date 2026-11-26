@@ -122,6 +122,50 @@ test('strips a fake PNG header in front of MPEG-TS data', async () => {
     assert.ok(res.body().equals(ts));
 });
 
+test('strips a whole PNG image in front of MPEG-TS data and serves it as video/mp2t', async () => {
+    const ts = Buffer.alloc(188 * 4);
+    for (let i = 0; i < 4; i++) ts[i * 188] = 0x47;
+    // A real-looking PNG: signature + IHDR + IDAT containing stray 0x47 bytes + IEND.
+    const png = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.from('0000000d49484452', 'hex'), Buffer.alloc(17, 0x47),
+        Buffer.alloc(870, 0x11),
+        Buffer.from('0000000049454e44ae426082', 'hex'),
+    ]);
+    handlers.set('/disguised/a.ts', (req, res) => {
+        res.setHeader('Content-Type', 'image/png');
+        res.write(png.subarray(0, 300));
+        setTimeout(() => res.end(Buffer.concat([png.subarray(300), ts])), 20);
+    });
+    const res = fakeRes();
+    await cache.serveSegment(`${base}/disguised/a.ts`, {}, res);
+    const b = res.body();
+    assert.ok(b.equals(ts));
+    assert.strictEqual(res.headers['content-type'], 'video/mp2t');
+});
+
+test('strips a 1x1 PNG in front of fragmented-MP4 data and serves it as video/mp4', async () => {
+    const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000' +
+        '1f15c4890000000d49444154789c63f8cfc0f01f0005000201a1a7e3c10000000049454e44ae426082', 'hex');
+    const mp4 = Buffer.concat([Buffer.from('00000018737479706d736468000000006d7364686d736978', 'hex'), Buffer.alloc(500, 0x47)]);
+    handlers.set('/disguised/b.m4s', (req, res) => {
+        res.setHeader('Content-Type', 'image/png');
+        res.end(Buffer.concat([png, mp4]));
+    });
+    const res = fakeRes();
+    await cache.serveSegment(`${base}/disguised/b.m4s`, {}, res);
+    assert.ok(res.body().equals(mp4));
+    assert.strictEqual(res.headers['content-type'], 'video/mp4');
+});
+
+test('passes through segments that are not disguised', async () => {
+    const data = Buffer.alloc(1000, 0x33);
+    handlers.set('/plain/1.ts', (req, res) => res.end(data));
+    const res = fakeRes();
+    await cache.serveSegment(`${base}/plain/1.ts`, {}, res);
+    assert.ok(res.body().equals(data));
+});
+
 test('streams bytes to the player before the upstream download finishes', async () => {
     let finishedAt = 0;
     handlers.set('/slow/1.ts', (req, res) => {

@@ -14,6 +14,7 @@ installHttpDispatcher();
 const { addonBuilder } = require('stremio-addon-sdk');
 import { getVixSrcStreams } from './vixsrc';
 import { getVixCloudStreams } from './vixcloud';
+import { getVideMStreams } from './videm';
 import { decodeProxyToken, getAddonBase, withTokenContext, StreamCtx } from './proxy';
 import { decodeConfig, encodeConfig, UserConfig, DEFAULT_CONFIG } from './config';
 import { registerMediaPlaylist, serveSegment } from './segment-cache';
@@ -36,6 +37,7 @@ const manifest = {
 };
 
 const VIXSRC_TIMEOUT_MS = 8000;
+const VIDEM_TIMEOUT_MS = 10000;
 const ANIMEUNITY_TIMEOUT_MS = 12000;
 const TMDB_TIMEOUT_MS = 4000;
 const STREAM_CACHE_TTL_MS = parseInt(process.env.STREAM_CACHE_TTL_MS || String(20 * 60 * 1000), 10);
@@ -115,21 +117,34 @@ async function resolveStreams(type: string, id: string, userConfig: UserConfig):
                 }
             }
 
-            if (userConfig.vixEnabled) {
-                // Title lookup and stream resolution run in parallel; the title is cosmetic.
-                const titlePromise = fetchMediaTitle(type, tmdbId, userConfig.vixLang);
-                const streamsPromise = withTimeout(getVixSrcStreams(tmdbId, season, episode, userConfig.vixLang), VIXSRC_TIMEOUT_MS, 'VixSrc')
+            // Sources run in parallel, each with its own timeout, so a slow one can't block the rest.
+            const vixPromise = userConfig.vixEnabled
+                ? (async () => {
+                    // Title lookup and stream resolution run in parallel; the title is cosmetic.
+                    const titlePromise = fetchMediaTitle(type, tmdbId, userConfig.vixLang);
+                    const streamsPromise = withTimeout(getVixSrcStreams(tmdbId, season, episode, userConfig.vixLang), VIXSRC_TIMEOUT_MS, 'VixSrc')
+                        .catch((err) => {
+                            console.error('[VixSrc] error:', err);
+                            return [] as any[];
+                        });
+                    const [mediaTitle, streams] = await Promise.all([titlePromise, streamsPromise]);
+                    for (const s of streams) {
+                        s.name = 'VixSrc 🤌';
+                        s.title = `🎬 ${mediaTitle || 'Stream'}`;
+                    }
+                    return streams;
+                })()
+                : Promise.resolve([] as any[]);
+            const videmPromise = userConfig.videmEnabled
+                ? withTimeout(getVideMStreams(type, tmdbId, season, episode, userConfig.vixLang), VIDEM_TIMEOUT_MS, 'VideM')
                     .catch((err) => {
-                        console.error('[VixSrc] error:', err);
+                        console.error('[VideM] error:', err);
                         return [] as any[];
-                    });
-                const [mediaTitle, streams] = await Promise.all([titlePromise, streamsPromise]);
-                for (const s of streams) {
-                    s.name = 'VixSrc 🤌';
-                    s.title = `🎬 ${mediaTitle || 'Stream'}`;
-                }
-                allStreams.push(...streams);
-            }
+                    })
+                : Promise.resolve([] as any[]);
+
+            const [vixStreams, videmStreams] = await Promise.all([vixPromise, videmPromise]);
+            allStreams.push(...vixStreams, ...videmStreams);
         }
     } catch (err) {
         console.error("Handler error:", err);
@@ -294,7 +309,7 @@ app.get('/proxy/hls/manifest.m3u8', async (req: any, res: any) => {
 });
 
 // ── HLS Proxy: segment proxy (cached + prefetch) ──
-app.get('/proxy/hls/segment.ts', async (req: any, res: any) => {
+app.get(['/proxy/hls/segment.ts', '/proxy/hls/segment.mp4'], async (req: any, res: any) => {
     try {
         const token = req.query.token;
         if (!token) return res.status(400).send('Missing token');

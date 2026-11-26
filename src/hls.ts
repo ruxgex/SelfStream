@@ -43,6 +43,8 @@ export async function loadPlaylist(upstream: string, headers: Record<string, str
         try {
             const { body, statusCode } = await request(upstream, {
                 headers,
+                // Some CDNs (e.g. VideM's XPT servers) redirect to the real host.
+                maxRedirections: 3,
                 headersTimeout: 10_000,
                 bodyTimeout: 15_000,
             });
@@ -173,7 +175,9 @@ export function parseMediaPlaylist(text: string, upstream: string): MediaSegment
 }
 
 export function rewriteMedia(text: string, upstream: string, headers: Record<string, string>, addonBase: string): string {
-    const segmentUrl = (url: string) => `${addonBase}/proxy/hls/segment.ts?token=${makeProxyToken(url, headers)}`;
+    // fMP4 playlists declare an init segment; ffmpeg-based players reject MP4 data behind a .ts URL.
+    const ext = text.includes('#EXT-X-MAP:') ? 'mp4' : 'ts';
+    const segmentUrl = (url: string) => `${addonBase}/proxy/hls/segment.${ext}?token=${makeProxyToken(url, headers)}`;
     const result: string[] = [];
     for (const line of text.split(/\r?\n/)) {
         if ((line.includes('#EXT-X-KEY:') || line.includes('#EXT-X-MAP:')) && line.includes('URI=')) {
