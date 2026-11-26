@@ -68,16 +68,16 @@ Il proxy è pensato per un server di casa la cui connessione internet è il coll
 
 Vedi `.env.example` per l'elenco completo.
 
-#### Opzionale: instrada il traffico tramite ProtonVPN (Gluetun)
+#### Opzionale: instrada il traffico tramite Surfshark WireGuard (Gluetun)
 
-1. Nel tuo [account Proton](https://account.proton.me/u/0/vpn/OpenVpnIKEv2) copia **username e password OpenVPN / IKEv2** (non il login Proton).
+1. Nella [dashboard Surfshark](https://my.surfshark.com/vpn/manual-setup/main/wireguard) vai su **Configurazione manuale → Router → WireGuard**, scegli **Non ho una coppia di chiavi**, dagli un nome e generala. Copia la **chiave privata** (viene mostrata una sola volta).
 2. Aggiungila a `.env`:
 
    ```bash
-   PROTONVPN_OPENVPN_USER=il_tuo_username_openvpn
-   PROTONVPN_OPENVPN_PASSWORD=la_tua_password_openvpn
-   PROTONVPN_SERVER_COUNTRIES=Netherlands   # opzionale
-   PROTONVPN_FREE_ONLY=on                    # solo se usi un piano Proton gratuito
+   SURFSHARK_WIREGUARD_PRIVATE_KEY=la_tua_chiave_privata
+   SURFSHARK_SERVER_COUNTRIES=Italy   # opzionale, scegli il più vicino per latenza minima
+   SURFSHARK_SERVER_CITIES=Milan      # opzionale
+   SURFSHARK_WIREGUARD_MTU=1280       # opzionale, il default va bene per il 4G
    ```
 
 3. Avvia la stack con l'override VPN:

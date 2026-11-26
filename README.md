@@ -68,16 +68,16 @@ The proxy is built for a home server whose internet link is the bottleneck: it d
 
 See `.env.example` for the full list.
 
-#### Optional: route traffic through ProtonVPN (Gluetun)
+#### Optional: route traffic through Surfshark WireGuard (Gluetun)
 
-1. In your [Proton account](https://account.proton.me/u/0/vpn/OpenVpnIKEv2), copy the **OpenVPN / IKEv2 username and password** (not your Proton login).
+1. In the [Surfshark dashboard](https://my.surfshark.com/vpn/manual-setup/main/wireguard), go to **Manual setup → Router → WireGuard**, choose **I don't have a key pair**, name it and generate it. Copy the **private key** (it is shown only once).
 2. Add it to `.env`:
 
    ```bash
-   PROTONVPN_OPENVPN_USER=your_openvpn_username
-   PROTONVPN_OPENVPN_PASSWORD=your_openvpn_password
-   PROTONVPN_SERVER_COUNTRIES=Netherlands   # optional
-   PROTONVPN_FREE_ONLY=on                    # only if you use a free Proton plan
+   SURFSHARK_WIREGUARD_PRIVATE_KEY=your_private_key
+   SURFSHARK_SERVER_COUNTRIES=Italy   # optional, pick the closest for lowest latency
+   SURFSHARK_SERVER_CITIES=Milan      # optional
+   SURFSHARK_WIREGUARD_MTU=1280       # optional, default suits 4G links
    ```
 
 3. Start the stack with the VPN override:
