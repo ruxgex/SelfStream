@@ -1,6 +1,6 @@
 # SelfStream 🤌
 
-Addon leggero e self-hosted per Stremio con **3 sorgenti configurabili**, proxy HLS integrato, supporto multi-lingua (40 lingue) e iniezione automatica dei sottotitoli.
+Addon leggero e self-hosted per Stremio con **2 sorgenti configurabili**, proxy HLS integrato e supporto multi-lingua (40 lingue).
 
 > **Tutte le sorgenti sono disabilitate di default.** Attiva solo quelle che ti servono dalla pagina di configurazione.
 
@@ -10,20 +10,17 @@ Addon leggero e self-hosted per Stremio con **3 sorgenti configurabili**, proxy 
 
 | Funzione | Descrizione |
 |---|---|
-| **3 Sorgenti** | **VixSrc** (film e serie), **CinemaCity** (film e serie + sottotitoli), **AnimeUnity** (anime tramite Kitsu) |
+| **2 Sorgenti** | **VixSrc** (film e serie), **AnimeUnity** (anime tramite Kitsu) |
 | **Configurazione per sorgente** | Abilita/disabilita ogni sorgente indipendentemente dalla landing page |
-| **40 Lingue** | Scegli lingua audio e sottotitoli preferita per ogni sorgente |
+| **40 Lingue** | Scegli la lingua audio preferita |
 | **Proxy HLS** | Tutti gli stream passano attraverso l'addon — bypassa restrizioni geo/IP |
 | **Synthetic FHD** | Il proxy riscrive i manifest per servire solo la qualità migliore disponibile (1080p) |
-| **Iniezione Sottotitoli** | CinemaCity: fino a 90 tracce VTT iniettate come stream HLS con codici lingua BCP-47 |
 | **Selezione Audio** | Lingua preferita → fallback inglese → primo disponibile |
-| **Selezione Sottotitoli** | Lingua preferita → nessuno (nessun fallback) |
 | **Titoli Localizzati** | I titoli degli stream mostrano il titolo TMDB localizzato nella tua lingua |
 | **ID Agnostico** | Funziona con ID TMDB (`786892`), IMDB (`tt30144839`) e Kitsu (`kitsu:12:1`) |
 
 ### Label degli Stream
 - **VixSrc**: `VixSrc 🤌` — `🎬 Titolo Localizzato`
-- **CinemaCity**: `CinemaCity 🤌` — `🎬 Titolo Localizzato`
 - **AnimeUnity**: `AU 🤌` — `VIX 1080 🤌`
 
 ---
@@ -55,6 +52,21 @@ tailscale funnel --bg 7000     # pubblico
 ```
 
 Cambia la porta dell'host con `SELFSTREAM_LOCAL_PORT` in `.env`.
+
+#### Buffering e cache
+
+Il proxy è pensato per un server di casa la cui connessione internet è il collo di bottiglia: scarica in anticipo rispetto alla riproduzione con download paralleli, ritenta i segmenti falliti (riprendendo i download parziali), invia i segmenti al player mentre arrivano e, verso la fine di un episodio, pre-scarica l'inizio del successivo. Si configura in `.env`:
+
+| Variabile | Default | Significato |
+|---|---|---|
+| `SEGMENT_PREFETCH_AHEAD_SECONDS` | `240` | Quanto scaricare in anticipo rispetto alla riproduzione. Un valore molto alto scarica l'intero episodio. |
+| `SEGMENT_PREFETCH_CONCURRENCY` | `4` | Download paralleli in prefetch. |
+| `SEGMENT_CACHE_MAX_MB` | `2048` | RAM usata per i segmenti in cache. |
+| `SEGMENT_FETCH_RETRIES` | `3` | Tentativi per segmento/playlist in caso di errori o timeout. |
+| `SEGMENT_NEXT_EPISODE_SECONDS` | `60` | Quanto pre-scaricare dell'episodio successivo. |
+| `STREAM_CACHE_TTL_MS` | `1200000` | Durata della cache delle liste stream (riaprire un titolo è istantaneo). |
+
+Vedi `.env.example` per l'elenco completo.
 
 #### Opzionale: instrada il traffico tramite ProtonVPN (Gluetun)
 
@@ -115,7 +127,7 @@ L'addon sarà disponibile su `http://tuo-ip:7020/manifest.json`.
 
 > **Nota**: AnimeUnity/VixCloud potrebbe non funzionare su HuggingFace a causa del blocco IP dei provider cloud.
 
-### Vercel (Serverless — veloce, con limitazioni, CinemaCity e AnimeUnity potrebbe non funzionare))
+### Vercel (Serverless — veloce, con limitazioni, AnimeUnity potrebbe non funzionare)
 
 [📺 Video Guida](https://www.youtube.com/watch?v=TP3_sbt94Ag)
 
@@ -147,6 +159,5 @@ L'addon gira su `http://localhost:7000` di default.
 ## Note Tecniche
 
 - **Architettura proxy**: Gli URL degli stream puntano a `/proxy/hls/manifest.m3u8` che riscrive tutti gli URI di segmenti/audio/sottotitoli per passare anch'essi dal proxy, garantendo la riproduzione da qualsiasi rete.
-- **Sottotitoli CinemaCity**: Il JSON del player espone un array `subtitle` con fino a 90 tracce VTT. Queste vengono wrappate in playlist HLS (`/proxy/hls/subtitle.m3u8` → `/proxy/hls/subtitle.vtt`) con iniezione di `X-TIMESTAMP-MAP` per la sincronizzazione.
 - **AnimeMapping**: Gli ID Kitsu vengono convertiti in percorsi AnimeUnity tramite l'API AnimeMapping, poi risolti attraverso VixCloud.
 - **Fallback cache headers**: Sulle piattaforme serverless dove la cache in memoria è vuota, il proxy inferisce gli headers corretti dal pattern dell'URL (VixSrc, VixCloud, o generico).

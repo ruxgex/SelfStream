@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "npx tsc",
+    "test": "npm run build && node --test --test-force-exit test/*.test.js",
     "start": "node dist/addon.js",
     "dev": "ts-node -O \"{\\\"module\\\":\\\"commonjs\\\", \\\"verbatimModuleSyntax\\\":false}\" src/addon.ts"
   },

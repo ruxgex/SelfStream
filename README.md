@@ -1,6 +1,6 @@
 # SelfStream 🤌
 
-A lightweight, self-hosted Stremio addon with **3 configurable sources**, built-in HLS proxy, multi-language support (40 languages), and automatic subtitle injection.
+A lightweight, self-hosted Stremio addon with **2 configurable sources**, built-in HLS proxy and multi-language support (40 languages).
 
 > **All sources are disabled by default.** Enable only the ones you need from the configuration page.
 
@@ -10,20 +10,17 @@ A lightweight, self-hosted Stremio addon with **3 configurable sources**, built-
 
 | Feature | Description |
 |---|---|
-| **3 Sources** | **VixSrc** (movies & series), **CinemaCity** (movies & series + subtitles), **AnimeUnity** (anime via Kitsu) |
+| **2 Sources** | **VixSrc** (movies & series), **AnimeUnity** (anime via Kitsu) |
 | **Per-source configuration** | Enable/disable each source independently from the landing page |
-| **40 Languages** | Select preferred audio and subtitle language per source |
+| **40 Languages** | Select preferred audio language |
 | **HLS Proxy** | All streams are proxied through the addon — bypasses geo/IP restrictions |
 | **Synthetic FHD** | Proxy rewrites manifests to serve only the best available quality (1080p) |
-| **Subtitle Injection** | CinemaCity: up to 90 VTT subtitle tracks injected as HLS subtitle streams with proper BCP-47 language codes |
 | **Audio Selection** | Preferred language → English fallback → first available |
-| **Subtitle Selection** | Preferred language → none (no fallback) |
 | **Localized Titles** | Stream titles show the localized TMDB title in your language |
 | **ID Agnostic** | Works with TMDB (`786892`), IMDB (`tt30144839`), and Kitsu (`kitsu:12:1`) IDs |
 
 ### Stream Labels
 - **VixSrc**: `VixSrc 🤌` — `🎬 Localized Title`
-- **CinemaCity**: `CinemaCity 🤌` — `🎬 Localized Title`
 - **AnimeUnity**: `AU 🤌` — `VIX 1080 🤌`
 
 ---
@@ -55,6 +52,21 @@ tailscale funnel --bg 7000     # public
 ```
 
 Change the host port with `SELFSTREAM_LOCAL_PORT` in `.env`.
+
+#### Buffering & cache tuning
+
+The proxy is built for a home server whose internet link is the bottleneck: it downloads ahead of the playhead in parallel, retries flaky segment fetches (resuming partial downloads), streams segments to the player as they arrive, and near the end of an episode pre-downloads the start of the next one. Tune it in `.env`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEGMENT_PREFETCH_AHEAD_SECONDS` | `240` | How far ahead of the playhead to download. A very large value downloads the whole episode. |
+| `SEGMENT_PREFETCH_CONCURRENCY` | `4` | Parallel prefetch downloads. |
+| `SEGMENT_CACHE_MAX_MB` | `2048` | RAM used for cached segments. |
+| `SEGMENT_FETCH_RETRIES` | `3` | Retries per segment/playlist on errors and timeouts. |
+| `SEGMENT_NEXT_EPISODE_SECONDS` | `60` | How much of the next episode to pre-download. |
+| `STREAM_CACHE_TTL_MS` | `1200000` | How long stream lists are cached (reopening a title is instant). |
+
+See `.env.example` for the full list.
 
 #### Optional: route traffic through ProtonVPN (Gluetun)
 
@@ -115,7 +127,7 @@ The addon will be available at `http://your-ip:7020/manifest.json`.
 
 > **Note**: AnimeUnity/VixCloud may not work on HuggingFace due to cloud IP blocking.
 
-### Vercel (Serverless — fast, limited, CinemaCity and AnimeUnity may not work)
+### Vercel (Serverless — fast, limited, AnimeUnity may not work)
 
 [📺 Video Guide](https://www.youtube.com/watch?v=TP3_sbt94Ag)
 
@@ -147,6 +159,5 @@ The addon runs on `http://localhost:7000` by default.
 ## Technical Notes
 
 - **Proxy architecture**: Stream URLs point to `/proxy/hls/manifest.m3u8` which rewrites all segment/audio/subtitle URIs to also go through the proxy, ensuring playback works from any network.
-- **CinemaCity subtitles**: The player JSON exposes a `subtitle` array with up to 90 VTT tracks. These are wrapped into HLS subtitle playlists (`/proxy/hls/subtitle.m3u8` → `/proxy/hls/subtitle.vtt`) with `X-TIMESTAMP-MAP` injection for sync.
 - **AnimeMapping**: Kitsu IDs are converted to AnimeUnity paths via the AnimeMapping API, then resolved through VixCloud.
 - **Header cache fallback**: On serverless platforms where the in-memory cache is empty, the proxy infers the correct headers from the URL pattern (VixSrc, VixCloud, or generic).

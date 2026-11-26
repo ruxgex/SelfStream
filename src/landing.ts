@@ -102,16 +102,6 @@ p.description{font-size:16px;color:var(--text-muted);line-height:1.6;margin-bott
     </div>
 </div>
 
-<div class="source-row enabled" id="cinemacity-row">
-    <div class="source-header">
-        <span class="source-label">🎬 CinemaCity <span class="source-badge">Multi-language</span></span>
-        <label class="toggle"><input type="checkbox" id="cinemacityEnabled" checked onchange="toggleSource('cinemacity')"><span class="toggle-slider"></span></label>
-    </div>
-    <div class="source-options">
-        <select id="cinemacityLang" class="lang-select">` + langOptions + `</select>
-    </div>
-</div>
-
 <div class="source-row disabled" id="animeunity-row">
     <div class="source-header">
         <span class="source-label">🇮🇹 AnimeUnity <span class="source-badge">Only Local and 🇮🇹 · Use Kitsu</span></span>
@@ -180,8 +170,6 @@ function getConfig(){
     return {
         vixEnabled: document.getElementById('vixEnabled').checked,
         vixLang: document.getElementById('vixLang').value,
-        cinemacityEnabled: document.getElementById('cinemacityEnabled').checked,
-        cinemacityLang: document.getElementById('cinemacityLang').value,
         animeunityEnabled: document.getElementById('animeunityEnabled').checked
     };
 }

@@ -47,7 +47,7 @@ async function getEmbedUrlFromApi(tmdbId: string, season?: string, episode?: str
     }
 }
 
-export async function getVixSrcStreams(tmdbId: string, season?: string, episode?: string, preferredLang?: string): Promise<{name: string, title: string, url: string}[]> {
+export async function getVixSrcStreams(tmdbId: string, season?: string, episode?: string, preferredLang?: string): Promise<{name: string, title: string, url: string, behaviorHints?: any}[]> {
     try {
         const siteOrigin = `https://${config.vixsrcDomain}`;
         
@@ -107,7 +107,7 @@ export async function getVixSrcStreams(tmdbId: string, season?: string, episode?
         }
 
         // 3. Construct final stream URL
-        const canPlayFHD = /window\.canPlayFHD\s*=\s*true/i.test(scriptContent) || /canPlayFHD/.test(scriptContent);
+        const canPlayFHD = /window\.canPlayFHD\s*=\s*true/i.test(scriptContent);
         
         const urlObj = new URL(serverUrl);
         // vixsrc.to now hands out dead obfuscated CDN hosts (*.boats); the same token on
@@ -143,7 +143,9 @@ export async function getVixSrcStreams(tmdbId: string, season?: string, episode?
         return [{
             name: "SC 🤌",
             title: "VIX 1080 🤌",
-            url: `/proxy/hls/manifest.m3u8?token=${proxyToken}`
+            url: `/proxy/hls/manifest.m3u8?token=${proxyToken}`,
+            // Lets Stremio auto-pick this same source for the next episode.
+            behaviorHints: { bingeGroup: `selfstream-vixsrc-${lang}` }
         }];
 
     } catch(err) {

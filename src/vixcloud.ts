@@ -7,19 +7,27 @@ const ANIMEMAPPING_BASE = Buffer.from('aHR0cHM6Ly9hbmltZW1hcHBpbmcuc3RyZW1pby5kc
 const AU_BASE = 'https://www.animeunity.so';
 const AU_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
-// ── Step 1: Resolve Kitsu ID → title + AnimeUnity path via animemapping ──
-async function resolveFromMapping(kitsuId: string, episodeNum: string): Promise<string | null> {
+// ── Step 1: Resolve Kitsu ID → AnimeUnity path + (remapped) episode number via animemapping ──
+async function resolveFromMapping(kitsuId: string, episodeNum: string): Promise<{ path: string | null; episode: number }> {
+    const ep = parseInt(episodeNum) || 1;
     try {
-        const ep = parseInt(episodeNum) || 1;
         const url = `${ANIMEMAPPING_BASE}/kitsu/${kitsuId}?ep=${ep}`;
         console.log(`[VixCloud] Fetching mapping: ${url}`);
         const { body, statusCode } = await request(url, { headers: { 'Accept': 'application/json' } });
         if (statusCode !== 200) {
+            await body.dump();
             console.log(`[VixCloud] Mapping API returned ${statusCode}`);
-            return null;
+            return { path: null, episode: ep };
         }
         const data: any = await body.json();
-        
+
+        // Handle absolute episode remapping
+        let episode = ep;
+        const fromKitsu = data?.kitsu?.episode;
+        const fromRequested = data?.requested?.episode;
+        if (typeof fromKitsu === 'number' && fromKitsu > 0) episode = fromKitsu;
+        else if (typeof fromRequested === 'number' && fromRequested > 0) episode = fromRequested;
+
         // Extract animeunity paths from mapping
         const auMapping = data?.mappings?.animeunity;
         if (auMapping) {
@@ -28,35 +36,15 @@ async function resolveFromMapping(kitsuId: string, episodeNum: string): Promise<
                 const path = typeof item === 'string' ? item : (item?.path || item?.url || item?.href || null);
                 if (path) {
                     console.log(`[VixCloud] Mapping found AnimeUnity path: ${path}`);
-                    return path;
+                    return { path, episode };
                 }
             }
         }
         console.log(`[VixCloud] No AnimeUnity path in mapping response`);
-        return null;
+        return { path: null, episode };
     } catch (err: any) {
         console.error('[VixCloud] Mapping API error:', err?.message || err);
-        return null;
-    }
-}
-
-// ── Step 2: Get episode number from mapping (handles absolute episode remapping) ──
-async function resolveEpisodeFromMapping(kitsuId: string, episodeNum: string): Promise<number> {
-    try {
-        const ep = parseInt(episodeNum) || 1;
-        const url = `${ANIMEMAPPING_BASE}/kitsu/${kitsuId}?ep=${ep}`;
-        const { body, statusCode } = await request(url, { headers: { 'Accept': 'application/json' } });
-        if (statusCode !== 200) return ep;
-        const data: any = await body.json();
-        
-        // Check for remapped episode number
-        const fromKitsu = data?.kitsu?.episode;
-        if (fromKitsu && typeof fromKitsu === 'number' && fromKitsu > 0) return fromKitsu;
-        const fromRequested = data?.requested?.episode;
-        if (fromRequested && typeof fromRequested === 'number' && fromRequested > 0) return fromRequested;
-        return ep;
-    } catch {
-        return parseInt(episodeNum) || 1;
+        return { path: null, episode: ep };
     }
 }
 
@@ -276,13 +264,12 @@ function ensureM3u8(url: string): string {
 }
 
 // ── Main entry point ──
-export async function getVixCloudStreams(kitsuId: string, episodeNumber: string = "1"): Promise<{name: string, title: string, url: string}[]> {
+export async function getVixCloudStreams(kitsuId: string, episodeNumber: string = "1"): Promise<{name: string, title: string, url: string, behaviorHints?: any}[]> {
     try {
         console.log(`[VixCloud] Resolving kitsu:${kitsuId} ep=${episodeNumber}`);
         
         // 1. Try animemapping API first for direct AnimeUnity path
-        const resolvedEp = await resolveEpisodeFromMapping(kitsuId, episodeNumber);
-        const mappedPath = await resolveFromMapping(kitsuId, episodeNumber);
+        const { path: mappedPath, episode: resolvedEp } = await resolveFromMapping(kitsuId, episodeNumber);
         
         let embedUrl: string | null = null;
         
@@ -336,7 +323,8 @@ export async function getVixCloudStreams(kitsuId: string, episodeNumber: string 
         return [{
             name: "AU 🤌",
             title: "VIX 1080 🤌",
-            url: `/proxy/hls/manifest.m3u8?token=${proxyToken}`
+            url: `/proxy/hls/manifest.m3u8?token=${proxyToken}`,
+            behaviorHints: { bingeGroup: 'selfstream-animeunity' }
         }];
 
     } catch (err: any) {

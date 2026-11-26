@@ -50,16 +50,12 @@ export const AVAILABLE_LANGUAGES = [
 export interface UserConfig {
   vixEnabled: boolean;
   vixLang: string;
-  cinemacityEnabled: boolean;
-  cinemacityLang: string;
   animeunityEnabled: boolean;
 }
 
 export const DEFAULT_CONFIG: UserConfig = {
   vixEnabled: true,
   vixLang: 'en',
-  cinemacityEnabled: true,
-  cinemacityLang: 'en',
   animeunityEnabled: false
 };
 
@@ -73,8 +69,6 @@ export function decodeConfig(token: string): UserConfig {
     return {
       vixEnabled: parsed.vixEnabled === true,
       vixLang: parsed.vixLang || DEFAULT_CONFIG.vixLang,
-      cinemacityEnabled: parsed.cinemacityEnabled === true,
-      cinemacityLang: parsed.cinemacityLang || DEFAULT_CONFIG.cinemacityLang,
       animeunityEnabled: parsed.animeunityEnabled === true
     };
   } catch {

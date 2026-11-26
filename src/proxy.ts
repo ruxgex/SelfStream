@@ -54,17 +54,39 @@ setInterval(() => {
     }
 }, 10 * 60 * 1000);
 
-export function makeProxyToken(url: string, headers: Record<string, string>, ttlMs: number = 6 * 3600 * 1000): string {
+/**
+ * What was being played (type, id, encoded user config). Carried in proxy tokens so the
+ * HLS proxy knows which episode a playlist belongs to and can warm up the next one.
+ */
+export interface StreamCtx {
+    t: string;
+    i: string;
+    c: string;
+}
+
+export function makeProxyToken(url: string, headers: Record<string, string>, ttlMs: number = 6 * 3600 * 1000, ctx?: StreamCtx): string {
     const hid = registerHeaders(headers, ttlMs);
-    const payload = {
+    const payload: any = {
         u: url,
         hid,
         e: Date.now() + ttlMs
     };
+    if (ctx) payload.c = ctx;
     return Buffer.from(JSON.stringify(payload)).toString('base64url');
 }
 
-export function decodeProxyToken(token: string): { u: string; h: Record<string, string>; e: number } | null {
+/** Return a copy of a proxy token with the stream context attached. */
+export function withTokenContext(token: string, ctx: StreamCtx): string {
+    try {
+        const raw = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
+        raw.c = ctx;
+        return Buffer.from(JSON.stringify(raw)).toString('base64url');
+    } catch {
+        return token;
+    }
+}
+
+export function decodeProxyToken(token: string): { u: string; h: Record<string, string>; e: number; c?: StreamCtx } | null {
     try {
         const raw = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
         // Support both old format (h: {...}) and new format (hid: "h1")
@@ -79,7 +101,7 @@ export function decodeProxyToken(token: string): { u: string; h: Record<string, 
                 } else if (url.includes('vixcloud') || url.includes('animeunity')) {
                     headers = { ...VIXCLOUD_HEADERS };
                 } else {
-                    // Generic headers for CinemaCity CDN etc
+                    // Generic headers for any other CDN
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                         'Accept': '*/*',
@@ -93,7 +115,10 @@ export function decodeProxyToken(token: string): { u: string; h: Record<string, 
         } else {
             headers = raw.h || {};
         }
-        return { u: raw.u, h: headers, e: raw.e || 0 };
+        const c = raw.c && typeof raw.c.t === 'string' && typeof raw.c.i === 'string' && typeof raw.c.c === 'string'
+            ? { t: raw.c.t, i: raw.c.i, c: raw.c.c }
+            : undefined;
+        return { u: raw.u, h: headers, e: raw.e || 0, c };
     } catch {
         return null;
     }
