@@ -1,3 +1,13 @@
+import * as net from 'net';
+import * as dns from 'dns';
+
+// Node's happy-eyeballs gives each address only 250ms to connect. Upstream hosts
+// (Cloudflare) resolve to IPv6 too, which is unreachable in most Docker setups, and
+// IPv4 connects routinely take 500ms+ at peak hours, so every attempt failed with
+// ETIMEDOUT. Prefer IPv4 and let a single connect use the full OS timeout.
+dns.setDefaultResultOrder('ipv4first');
+net.setDefaultAutoSelectFamily(false);
+
 const { addonBuilder } = require('stremio-addon-sdk');
 import { getVixSrcStreams } from './vixsrc';
 import { getVixCloudStreams } from './vixcloud';
