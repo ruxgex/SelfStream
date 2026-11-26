@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { MockAgent, setGlobalDispatcher } = require('undici');
-const { getVideMStreams, rankServers, parseVideMPage, formatTitle } = require('../dist/videm');
+const { getVideMStreams, rankServers, parseVideMPage, formatTitle, subtitleLangCode } = require('../dist/videm');
 
 function page(q) {
     return `<html><body><script>
@@ -93,4 +93,36 @@ test('returns nothing when the embed page is missing', async () => {
     setGlobalDispatcher(agent);
     agent.get('https://videm.buzz').intercept({ path: '/embed/movie/1' }).reply(404, 'nope');
     assert.deepStrictEqual(await getVideMStreams('movie', '1'), []);
+});
+
+test('attaches VideM subtitles to every stream, preferred language first', async () => {
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    const site = agent.get('https://videm.buzz');
+    site.intercept({ path: '/embed/movie/550' }).reply(200, page({
+        type: 'movie', id: '550', s: 0, e: 0, t: 'tok', ssr: { status: 'ok', servers: [servers[2]] },
+    }));
+    site.intercept({ path: '/api.php?a=subs&type=movie&id=550&s=0&e=0&t=tok' }).reply(200, {
+        subs: [
+            { label: 'English', lang: 'English', ref: 'en ref' },
+            { label: 'Italian', lang: 'Italian', ref: 'it-ref' },
+            { label: 'Klingon', lang: 'Klingon', ref: 'tlh' },
+        ],
+    });
+    site.intercept({ path: '/api.php?a=play&ref=r-x&t=tok' }).reply(200, { url: '/_stream?id=x', type: 'hls' });
+
+    const [stream] = await getVideMStreams('movie', '550', undefined, undefined, 'it');
+    assert.deepStrictEqual(stream.subtitles.map((s) => [s.id, s.lang, decodeUpstream(s.url)]), [
+        ['videm-1', 'ita', 'https://videm.buzz/api.php?a=sub&ref=it-ref'],
+        ['videm-0', 'eng', 'https://videm.buzz/api.php?a=sub&ref=en%20ref'],
+        ['videm-2', 'Klingon', 'https://videm.buzz/api.php?a=sub&ref=tlh'],
+    ]);
+    assert.ok(stream.subtitles.every((s) => s.url.startsWith('/proxy/subtitle.vtt?token=')));
+});
+
+test('maps subtitle language names to ISO 639-2 codes', () => {
+    assert.strictEqual(subtitleLangCode('Portuguese (Brazil)'), 'pob');
+    assert.strictEqual(subtitleLangCode('Croatian'), 'hrv');
+    assert.strictEqual(subtitleLangCode('Spanish (Latin America)'), 'spa');
 });

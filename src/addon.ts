@@ -8,6 +8,7 @@ import * as dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 net.setDefaultAutoSelectFamily(false);
 
+import { request } from 'undici';
 import { installHttpDispatcher, withTimeout } from './http';
 installHttpDispatcher();
 
@@ -230,7 +231,12 @@ app.get('/:config/manifest.json', (req: any, res: any) => {
 
 function absolutize(streams: any[], addonBase: string): any[] {
     // Copy: cached stream objects must keep their relative URLs.
-    return streams.map((s: any) => (s.url && s.url.startsWith('/') ? { ...s, url: `${addonBase}${s.url}` } : s));
+    const abs = (url: string) => (url && url.startsWith('/') ? `${addonBase}${url}` : url);
+    return streams.map((s: any) => {
+        const out = { ...s, url: abs(s.url) };
+        if (Array.isArray(s.subtitles)) out.subtitles = s.subtitles.map((sub: any) => ({ ...sub, url: abs(sub.url) }));
+        return out;
+    });
 }
 
 // ── Stream Endpoint: with user config ──
@@ -306,6 +312,52 @@ app.get('/proxy/hls/manifest.m3u8', async (req: any, res: any) => {
         console.error('[HLS Proxy] error:', e?.message || e);
         if (!res.headersSent) res.status(500).send('#EXTM3U\n# Internal error');
     }
+});
+
+// ── Subtitle proxy: fetch upstream subtitles with the headers the source requires ──
+const SUBTITLE_CACHE_TTL_MS = 60 * 60 * 1000;
+const subtitleCache = new Map<string, { body: Buffer; contentType: string; expireAt: number }>();
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [url, entry] of subtitleCache) {
+        if (entry.expireAt < now) subtitleCache.delete(url);
+    }
+}, 10 * 60 * 1000).unref();
+
+app.get('/proxy/subtitle.vtt', async (req: any, res: any) => {
+    const decoded = req.query.token ? decodeProxyToken(req.query.token) : null;
+    if (!decoded?.u) return res.status(400).send('Invalid token');
+    if (decoded.e && Date.now() > decoded.e) return res.status(410).send('Token expired');
+
+    let entry = subtitleCache.get(decoded.u);
+    if (!entry || entry.expireAt < Date.now()) {
+        try {
+            const { body, statusCode, headers } = await request(decoded.u, {
+                headers: decoded.h || {},
+                maxRedirections: 3,
+                headersTimeout: 10_000,
+                bodyTimeout: 15_000,
+            });
+            if (statusCode !== 200) {
+                await body.dump();
+                return res.status(502).send(`Upstream error ${statusCode}`);
+            }
+            const ct = headers['content-type'];
+            entry = {
+                body: Buffer.from(await body.arrayBuffer()),
+                contentType: (Array.isArray(ct) ? ct[0] : ct) || 'text/vtt; charset=utf-8',
+                expireAt: Date.now() + SUBTITLE_CACHE_TTL_MS,
+            };
+            subtitleCache.set(decoded.u, entry);
+        } catch (e: any) {
+            console.error('[Subtitle Proxy] error:', e?.message || e);
+            return res.status(502).send('Upstream error');
+        }
+    }
+    res.setHeader('Content-Type', entry.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(entry.body);
 });
 
 // ── HLS Proxy: segment proxy (cached + prefetch) ──

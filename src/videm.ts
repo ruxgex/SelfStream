@@ -15,7 +15,29 @@ const MAX_SERVERS = parseInt(process.env.VIDEM_MAX_SERVERS || '4', 10);
 const PLAY_TIMEOUT_MS = 5000;
 const QUALITY_TIMEOUT_MS = 3000;
 
-type VideMStream = { name: string; title: string; url: string; behaviorHints?: any };
+export interface VideMSubtitle {
+    id: string;
+    url: string;
+    lang: string;
+}
+
+type VideMStream = { name: string; title: string; url: string; behaviorHints?: any; subtitles?: VideMSubtitle[] };
+
+// Stremio groups subtitles by ISO 639-2 code; VideM labels them with English names.
+const LANG_CODES: Record<string, string> = {
+    english: 'eng', italian: 'ita', spanish: 'spa', french: 'fre', german: 'ger', portuguese: 'por',
+    'brazilian portuguese': 'pob', 'portuguese (brazil)': 'pob', russian: 'rus', japanese: 'jpn', korean: 'kor',
+    chinese: 'chi', arabic: 'ara', hindi: 'hin', turkish: 'tur', polish: 'pol', dutch: 'dut', romanian: 'rum',
+    greek: 'gre', hebrew: 'heb', hungarian: 'hun', czech: 'cze', danish: 'dan', finnish: 'fin', swedish: 'swe',
+    norwegian: 'nor', indonesian: 'ind', malay: 'may', thai: 'tha', vietnamese: 'vie', croatian: 'hrv',
+    serbian: 'srp', bulgarian: 'bul', ukrainian: 'ukr', slovak: 'slo', slovenian: 'slv', persian: 'per',
+    catalan: 'cat', basque: 'baq', galician: 'glg', tamil: 'tam', telugu: 'tel', malayalam: 'mal', bengali: 'ben',
+};
+
+export function subtitleLangCode(name: string): string {
+    const key = name.trim().toLowerCase();
+    return LANG_CODES[key] || LANG_CODES[key.split(/[\s(]/)[0]] || name;
+}
 
 interface Quality {
     height?: number;
@@ -117,6 +139,40 @@ export function formatTitle(mediaTitle: string, q: Quality, kind: string, lang: 
     return title ? `🎬 ${title}\n${details}` : details;
 }
 
+/** VideM's own (OpenSubtitles-backed) subtitles as Stremio subtitle entries, your language first. */
+async function getSubtitles(page: VideMPage, pageUrl: string, preferredLang: string): Promise<VideMSubtitle[]> {
+    const qs = `type=${page.type}&id=${encodeURIComponent(page.id)}&s=${page.s}&e=${page.e}&t=${encodeURIComponent(page.t)}`;
+    const text = await getText(`${origin()}/api.php?a=subs&${qs}`, pageUrl);
+    if (!text) return [];
+    let list: any[];
+    try {
+        list = JSON.parse(text)?.subs || [];
+    } catch {
+        return [];
+    }
+    const wanted = languageName(preferredLang);
+    const subs = list
+        .filter((s) => typeof s?.ref === 'string' || typeof s?.url === 'string')
+        .map((s, i) => {
+            const name = String(s.lang || s.label || 'Unknown');
+            return {
+                id: `videm-${i}`,
+                // Proxied: VideM refuses subtitle downloads without a browser User-Agent,
+                // which TV players don't send.
+                url: `/proxy/subtitle.vtt?token=${makeProxyToken(
+                    typeof s.url === 'string' && s.url
+                        ? new URL(s.url, `${origin()}/`).toString()
+                        : `${origin()}/api.php?a=sub&ref=${encodeURIComponent(s.ref)}`,
+                    siteHeaders(pageUrl)
+                )}`,
+                lang: subtitleLangCode(name),
+                preferred: !!wanted && name.toLowerCase().includes(wanted),
+            };
+        });
+    subs.sort((a, b) => Number(b.preferred) - Number(a.preferred));
+    return subs.map(({ preferred, ...sub }) => sub);
+}
+
 async function resolvePlay(server: VideMServer, token: string, referer: string): Promise<{ url: string; type: string } | null> {
     const url = `${origin()}/api.php?a=play&ref=${encodeURIComponent(server.ref)}&t=${encodeURIComponent(token)}`;
     const text = await getText(url, referer);
@@ -168,9 +224,13 @@ export async function getVideMStreams(
         return [];
     }
 
+    // Subtitles are fetched alongside the plays; VideM streams carry no embedded subtitle tracks.
+    const subsPromise = withTimeout(getSubtitles(page, pageUrl, preferredLang), PLAY_TIMEOUT_MS, 'VideM subs')
+        .catch(() => [] as VideMSubtitle[]);
     const played = await Promise.all(ranked.map((s) =>
         withTimeout(resolvePlay(s, page.t, pageUrl), PLAY_TIMEOUT_MS, `VideM ${s.name}`).catch(() => null)
     ));
+    const subtitles = await subsPromise;
 
     const headers = siteHeaders(`${origin()}/`);
     const qualities = await Promise.all(ranked.map((_, i) => {
@@ -206,6 +266,7 @@ export async function getVideMStreams(
                 behaviorHints: { bingeGroup, notWebReady: true, proxyHeaders: { request: headers } },
             };
         const inLang = !!wanted && !!server.lang && server.lang.toLowerCase().includes(wanted);
+        if (subtitles.length) stream.subtitles = subtitles;
         resolved.push({ stream, inLang, proxied, height: q.height || 0 });
     });
 
